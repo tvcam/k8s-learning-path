@@ -82,6 +82,59 @@ ansible/
 
 **SSH fails**: Wait 1-2 min for servers to boot, then retry playbook.
 
-## Learn More
+## Learning Path
 
-See `01-understand-k8s.md` and `02-using-ansible.md` for detailed guides.
+This repository contains a structured learning path for Kubernetes:
+
+### Phase 1: Understanding Kubernetes
+**File:** `01-understand-k8s.md`
+
+Learn the fundamentals:
+- What is Kubernetes and why use it
+- Core concepts: Pods, Deployments, Services
+- Architecture overview
+- When to use Kubernetes
+
+### Phase 2: Cluster Setup with Ansible
+**Directory:** `ansible/`
+**Guides:** `02-using-ansible.md`
+
+Automated cluster deployment:
+- Provision Hetzner Cloud servers via API
+- Install and configure Kubernetes
+- Set up networking with Flannel
+- Ready-to-use cluster in 15 minutes
+
+### Phase 3: Deploying Applications
+**File:** `03-deploying-applications.md`
+**Directory:** `workloads/`
+
+Hands-on exercises deploying real apps:
+- Pods and Deployments
+- Services (ClusterIP, NodePort)
+- Ingress controller and routing
+- Real applications: Redis, PostgreSQL, WordPress, Grafana
+- ConfigMaps, Secrets, and persistent storage
+
+**Start here:** `03-deploying-applications.md`
+
+## Repository Structure
+
+```
+k8s-learning-path/
+├── README.md                      # This file
+├── 01-understand-k8s.md           # Phase 1: Concepts
+├── 02-using-ansible.md            # Phase 2: Setup guide
+├── 03-deploying-applications.md   # Phase 3: Hands-on exercises
+├── ansible/                       # Cluster automation
+│   ├── provision.yml
+│   ├── playbook.yml
+│   ├── destroy.yml
+│   └── roles/
+└── workloads/                     # Application manifests
+    ├── 01-pods/                   # Basic pods
+    ├── 02-deployments/            # Deployments
+    ├── 03-services/               # Services
+    ├── 04-ingress/                # Ingress controller
+    └── 05-real-apps/              # Production-like apps
+```
