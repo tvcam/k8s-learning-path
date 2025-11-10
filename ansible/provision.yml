@@ -1,0 +1,70 @@
+---
+- name: Provision Hetzner servers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+    location: hel1
+    image: ubuntu-22.04
+    ssh_key_name: vibol-key        # must exist in your Hetzner Cloud account
+    server_type_master: cx32       # 4 CPU, 8GB RAM
+    server_type_worker: cx22       # 2 CPU, 4GB RAM
+    master_count: 1
+    worker_count: 2
+
+  tasks:
+    - name: Create master node
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-master"
+        server_type: "{{ server_type_master }}"
+        image: "{{ image }}"
+        location: "{{ location }}"
+        ssh_keys:
+          - "{{ ssh_key_name }}"
+        state: present
+        wait: yes
+      register: master
+
+    - name: Create worker nodes
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-worker-{{ item }}"
+        server_type: "{{ server_type_worker }}"
+        image: "{{ image }}"
+        location: "{{ location }}"
+        ssh_keys:
+          - "{{ ssh_key_name }}"
+        state: present
+        wait: yes
+      loop: "{{ range(1, worker_count + 1) | list }}"
+      register: workers
+
+    - name: Generate inventory file
+      copy:
+        dest: inventory.ini
+        content: |
+          [master]
+          master ansible_host={{ master.server.public_net.ipv4.ip }} ansible_user=root
+
+          [workers]
+          {% for w in workers.results %}
+          worker{{ loop.index }} ansible_host={{ w.server.public_net.ipv4.ip }} ansible_user=root
+          {% endfor %}
+
+          [kubernetes:children]
+          master
+          workers
+
+    - name: Show connection info
+      debug:
+        msg: |
+          Cluster created ✅
+          Master IP: {{ master.server.public_net.ipv4.ip }}
+          Worker IPs:
+          {% for w in workers.results %}
+            - {{ w.server.public_net.ipv4.ip }}
+          {% endfor %}
+          Inventory saved to ./inventory.ini
+

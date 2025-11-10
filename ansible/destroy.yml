@@ -1,0 +1,36 @@
+---
+- name: Delete all k8s servers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+  tasks:
+    - name: Get list of all servers
+      hetzner.hcloud.hcloud_server_info:
+        api_token: "{{ hcloud_token }}"
+      register: all_servers
+
+    - name: Remove k8s-master server
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-master"
+        state: absent
+      ignore_errors: yes
+
+    - name: Remove k8s-worker servers
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "{{ item.name }}"
+        state: absent
+      loop: "{{ all_servers.hcloud_server_info | selectattr('name', 'match', '^k8s-worker-.*') | list }}"
+      when: all_servers.hcloud_server_info is defined
+
+    - name: Remove inventory file
+      file:
+        path: inventory.ini
+        state: absent
+
+    - debug:
+        msg: "All k8s servers have been destroyed ✅"
+

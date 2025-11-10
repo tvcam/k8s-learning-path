@@ -1,0 +1,23 @@
+---
+- name: Configure all Kubernetes nodes
+  hosts: kubernetes
+  become: yes
+  gather_facts: yes
+  roles:
+    - common
+    - containerd
+
+- name: Setup Kubernetes master
+  hosts: master
+  become: yes
+  gather_facts: yes
+  roles:
+    - kubernetes-master
+
+- name: Setup Kubernetes workers
+  hosts: workers
+  become: yes
+  gather_facts: yes
+  roles:
+    - kubernetes-worker
+
