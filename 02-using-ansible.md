@@ -1,284 +1,206 @@
-Ah — got it 😎
-You want **Step 10: Automate Kubernetes setup on Hetzner with Ansible** — a minimal but *production-ready* playbook that installs Kubernetes (via `kubeadm`), joins nodes, installs Flannel, and makes your cluster reproducible.
+Your Ansible playbook will not only configure Kubernetes, but also **create the Hetzner Cloud servers via API**, then set them up and join them automatically into a working cluster.
 
-Let’s build this in a way that perfectly fits **your workflow**:
-➡ Hetzner VPS instances (Ubuntu 22.04)
-➡ Manual Hetzner provisioning (or use hcloud CLI later)
-➡ Lightweight, secure, repeatable setup
-➡ Works for 1 control plane + 2 workers
+This will give you:
+
+* Reproducible infrastructure (no manual Hetzner setup)
+* One-command deployment for master + workers
+* Ready-to-use kubeconfig file in minutes
 
 ---
 
-## 🧩 Folder structure
+## 🧱 PREREQUISITES
+
+1. You need a **Hetzner Cloud API token**
+   → Create from [console.hetzner.cloud → Access → API Tokens].
+   → Copy it — it starts with `hcloud_...`.
+
+2. Install dependencies **on your local machine**:
+
+   ```bash
+   sudo apt install -y python3-pip
+   pip install ansible hetzner.hcloud
+   ansible-galaxy collection install hetzner.hcloud
+   ```
+
+3. Save your token locally (for Ansible use):
+
+   ```bash
+   export HCLOUD_TOKEN="hcloud_xxxxxxxxxxxxxxxxxxxxx"
+   ```
+
+---
+
+## 📂 Folder structure (updated)
 
 ```
 ansible/
-├── inventory.ini
+├── inventory.ini             # generated automatically
 ├── playbook.yml
+├── provision.yml             # creates servers
 ├── roles/
 │   ├── common/
-│   │   └── tasks/main.yml
 │   ├── containerd/
-│   │   └── tasks/main.yml
 │   ├── kubernetes-master/
-│   │   └── tasks/main.yml
 │   └── kubernetes-worker/
-│       └── tasks/main.yml
 ```
+
+You already have the `roles/` from earlier.
 
 ---
 
-## 🧠 inventory.ini
+## ⚙️ 1️⃣ provision.yml — create servers on Hetzner
 
-Define your nodes and SSH access:
-
-```ini
-[master]
-master ansible_host=95.217.xxx.xxx ansible_user=root
-
-[workers]
-worker1 ansible_host=88.198.xxx.xxx ansible_user=root
-worker2 ansible_host=65.109.xxx.xxx ansible_user=root
-
-[kubernetes:children]
-master
-workers
-```
-
-*(You can replace IPs and users as needed. `root` works fine on fresh Hetzner Ubuntu images.)*
-
----
-
-## ⚙️ playbook.yml
-
-```yaml
-- hosts: all
-  become: true
-  roles:
-    - common
-    - containerd
-
-- hosts: master
-  become: true
-  roles:
-    - kubernetes-master
-
-- hosts: workers
-  become: true
-  roles:
-    - kubernetes-worker
-```
-
----
-
-## 🧱 roles/common/tasks/main.yml
-
-Base OS configuration (swap, sysctl, packages):
+This playbook talks directly to the Hetzner Cloud API.
 
 ```yaml
 ---
-- name: Disable swap
-  command: swapoff -a
-  args:
-    warn: false
+- name: Provision Hetzner servers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+    location: hel1
+    image: ubuntu-22.04
+    ssh_key_name: vibol-key        # must exist in your Hetzner Cloud account
+    server_type_master: cx32       # 4 CPU, 8GB RAM
+    server_type_worker: cx22       # 2 CPU, 4GB RAM
+    master_count: 1
+    worker_count: 2
 
-- name: Disable swap in fstab
-  replace:
-    path: /etc/fstab
-    regexp: '(^[^#].*\bswap\b.*$)'
-    replace: '# \1'
+  tasks:
+    - name: Create master node
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-master"
+        server_type: "{{ server_type_master }}"
+        image: "{{ image }}"
+        location: "{{ location }}"
+        ssh_keys:
+          - "{{ ssh_key_name }}"
+        state: present
+        wait: yes
+      register: master
 
-- name: Load kernel modules
-  shell: |
-    modprobe overlay
-    modprobe br_netfilter
+    - name: Create worker nodes
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-worker-{{ item }}"
+        server_type: "{{ server_type_worker }}"
+        image: "{{ image }}"
+        location: "{{ location }}"
+        ssh_keys:
+          - "{{ ssh_key_name }}"
+        state: present
+        wait: yes
+      loop: "{{ range(1, worker_count + 1) | list }}"
+      register: workers
 
-- name: Set sysctl params
-  copy:
-    dest: /etc/sysctl.d/k8s.conf
-    content: |
-      net.bridge.bridge-nf-call-iptables  = 1
-      net.bridge.bridge-nf-call-ip6tables = 1
-      net.ipv4.ip_forward                 = 1
-  notify: reload sysctl
+    - name: Generate inventory file
+      copy:
+        dest: inventory.ini
+        content: |
+          [master]
+          master ansible_host={{ master.server.public_net.ipv4.ip }} ansible_user=root
 
-- name: Install base packages
-  apt:
-    name:
-      - apt-transport-https
-      - curl
-      - ca-certificates
-      - gnupg
-    update_cache: yes
+          [workers]
+          {% for w in workers.results %}
+          worker{{ loop.index }} ansible_host={{ w.server.public_net.ipv4.ip }} ansible_user=root
+          {% endfor %}
 
-- name: reload sysctl
-  command: sysctl --system
-  listen: reload sysctl
+          [kubernetes:children]
+          master
+          workers
+
+    - name: Show connection info
+      debug:
+        msg: |
+          Cluster created ✅
+          Master IP: {{ master.server.public_net.ipv4.ip }}
+          Worker IPs:
+          {% for w in workers.results %}
+            - {{ w.server.public_net.ipv4.ip }}
+          {% endfor %}
+          Inventory saved to ./inventory.ini
 ```
 
 ---
 
-## 🧰 roles/containerd/tasks/main.yml
+## ⚙️ 2️⃣ playbook.yml — configure and join cluster
 
-Install and configure containerd:
+Use the same `playbook.yml` we built earlier.
+It references roles `common`, `containerd`, `kubernetes-master`, and `kubernetes-worker`.
 
-```yaml
----
-- name: Install containerd
-  apt:
-    name: containerd
-    state: present
+Together, they:
 
-- name: Create containerd config
-  shell: |
-    mkdir -p /etc/containerd
-    containerd config default > /etc/containerd/config.toml
-  args:
-    creates: /etc/containerd/config.toml
-
-- name: Enable and restart containerd
-  systemd:
-    name: containerd
-    enabled: yes
-    state: restarted
-```
+* Install containerd
+* Install kubeadm/kubectl/kubelet
+* Initialize control plane
+* Apply Flannel
+* Join workers automatically
 
 ---
 
-## 🧠 roles/kubernetes-master/tasks/main.yml
+## ⚙️ 3️⃣ Run it all
 
-Initialize the control plane and install Flannel:
-
-```yaml
----
-- name: Add Kubernetes APT repo
-  shell: |
-    curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
-    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-  args:
-    creates: /etc/apt/sources.list.d/kubernetes.list
-
-- name: Install kubeadm, kubelet, kubectl
-  apt:
-    name:
-      - kubelet
-      - kubeadm
-      - kubectl
-    state: present
-    update_cache: yes
-
-- name: Initialize the cluster
-  command: kubeadm init --pod-network-cidr=10.244.0.0/16
-  args:
-    creates: /etc/kubernetes/admin.conf
-  register: kubeinit
-
-- name: Create kubeconfig for user
-  shell: |
-    mkdir -p $HOME/.kube
-    cp -i /etc/kubernetes/admin.conf $HOME/.kube/config
-    chown $(id -u):$(id -g) $HOME/.kube/config
-  environment:
-    HOME: /root
-
-- name: Save join command
-  shell: kubeadm token create --print-join-command
-  register: join_cmd
-
-- name: Write join command to file
-  local_action:
-    module: copy
-    content: "{{ join_cmd.stdout }}"
-    dest: join-command.txt
-
-- name: Install Flannel CNI
-  shell: kubectl apply -f https://raw.githubusercontent.com/flannel-io/flannel/master/Documentation/kube-flannel.yml
-  environment:
-    KUBECONFIG: /etc/kubernetes/admin.conf
-```
-
----
-
-## 🧩 roles/kubernetes-worker/tasks/main.yml
-
-Join worker nodes to the cluster automatically:
-
-```yaml
----
-- name: Add Kubernetes APT repo
-  shell: |
-    curl -fsSLo /etc/apt/keyrings/kubernetes-archive-keyring.gpg https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
-    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-archive-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
-  args:
-    creates: /etc/apt/sources.list.d/kubernetes.list
-
-- name: Install kubeadm, kubelet, kubectl
-  apt:
-    name:
-      - kubelet
-      - kubeadm
-      - kubectl
-    state: present
-    update_cache: yes
-
-- name: Read join command from local file
-  delegate_to: localhost
-  run_once: true
-  slurp:
-    src: join-command.txt
-  register: join_data
-
-- name: Join cluster
-  command: "{{ join_data.content | b64decode }}"
-  args:
-    creates: /etc/kubernetes/kubelet.conf
-```
-
----
-
-## 🚀 Running the playbook
+Now just run these two playbooks in sequence:
 
 ```bash
 cd ansible
+ansible-playbook provision.yml
 ansible-playbook -i inventory.ini playbook.yml
 ```
 
-### What happens
-
-* All nodes are prepped with common settings
-* Containerd is installed
-* Master is initialized and Flannel applied
-* Workers automatically join using the generated join token
-* You end up with a ready-to-use cluster in 10–15 min 🔥
-
-Check it:
+After ~10–15 min:
 
 ```bash
+ssh root@$(grep master inventory.ini | awk '{print $2}' | cut -d= -f2)
 kubectl get nodes
+```
+
+✅ You’ll see:
+
+```
+NAME         STATUS   ROLES    AGE   VERSION
+master       Ready    control-plane   5m   v1.30.x
+worker1      Ready    <none>          3m   v1.30.x
+worker2      Ready    <none>          3m   v1.30.x
 ```
 
 ---
 
-## 💡 Optional improvements later
+## ⚡ Bonus: optional teardown
 
-| Feature                    | How                                                                  |
-| -------------------------- | -------------------------------------------------------------------- |
-| **Hetzner CSI driver**     | Add another role to install it (persistent volumes)                  |
-| **Ingress setup**          | Add role to deploy NGINX ingress + cert-manager                      |
-| **Firewall setup**         | Use `ufw` or Hetzner Cloud Firewall module                           |
-| **Automated provisioning** | Use `hetzner.hcloud_server` Ansible module to create VPS dynamically |
+To destroy all servers later:
+
+```yaml
+- name: Delete all k8s servers
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
+  tasks:
+    - name: Remove all cluster servers
+      hetzner.hcloud.hcloud_server:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-*"
+        state: absent
+```
+
+Run with:
+
+```bash
+ansible-playbook destroy.yml
+```
 
 ---
 
-## ✅ TL;DR
+## 🧠 Summary
 
-This playbook gives you:
+After this setup:
 
-* Reproducible Kubernetes setup across any fresh Hetzner VPS
-* Declarative join process (auto token handling)
-* Modularity (add ingress, CSI, monitoring later)
-* Safe and minimal configuration (containerd, Flannel, kubeadm)
-
----
-
-Would you like me to extend this playbook next to **automatically provision Hetzner servers via API (no manual VPS creation)** and then run the same setup end-to-end?
+* You can deploy a **fresh Kubernetes cluster from scratch with one command**.
+* Hetzner automatically provisions the servers via API.
+* Ansible installs and joins them into a working cluster.
+* You can rebuild or destroy it any time without touching the Hetzner console.
