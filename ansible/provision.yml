@@ -3,15 +3,16 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  become: no
   vars:
     hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
     location: hel1
     image: ubuntu-22.04
-    ssh_key_name: vibol-key        # must exist in your Hetzner Cloud account
+    ssh_key_name: vibol_z400        # must exist in your Hetzner Cloud account
     server_type_master: cx32       # 4 CPU, 8GB RAM
     server_type_worker: cx22       # 2 CPU, 4GB RAM
     master_count: 1
-    worker_count: 2
+    worker_count: 1                # Using 1 worker due to server limits on new accounts
 
   tasks:
     - name: Create master node
@@ -24,7 +25,6 @@
         ssh_keys:
           - "{{ ssh_key_name }}"
         state: present
-        wait: yes
       register: master
 
     - name: Create worker nodes
@@ -37,20 +37,36 @@
         ssh_keys:
           - "{{ ssh_key_name }}"
         state: present
-        wait: yes
       loop: "{{ range(1, worker_count + 1) | list }}"
       register: workers
+
+    - name: Wait for servers to be fully ready
+      pause:
+        seconds: 5
+
+    - name: Get master server info
+      hetzner.hcloud.hcloud_server_info:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-master"
+      register: master_info
+
+    - name: Get worker server info
+      hetzner.hcloud.hcloud_server_info:
+        api_token: "{{ hcloud_token }}"
+        name: "k8s-worker-{{ item }}"
+      loop: "{{ range(1, worker_count + 1) | list }}"
+      register: workers_info
 
     - name: Generate inventory file
       copy:
         dest: inventory.ini
         content: |
           [master]
-          master ansible_host={{ master.server.public_net.ipv4.ip }} ansible_user=root
+          master ansible_host={{ master_info.hcloud_server_info[0].ipv4_address }} ansible_user=root
 
           [workers]
-          {% for w in workers.results %}
-          worker{{ loop.index }} ansible_host={{ w.server.public_net.ipv4.ip }} ansible_user=root
+          {% for w in workers_info.results %}
+          worker{{ loop.index }} ansible_host={{ w.hcloud_server_info[0].ipv4_address }} ansible_user=root
           {% endfor %}
 
           [kubernetes:children]
@@ -61,10 +77,10 @@
       debug:
         msg: |
           Cluster created ✅
-          Master IP: {{ master.server.public_net.ipv4.ip }}
+          Master IP: {{ master_info.hcloud_server_info[0].ipv4_address }}
           Worker IPs:
-          {% for w in workers.results %}
-            - {{ w.server.public_net.ipv4.ip }}
+          {% for w in workers_info.results %}
+            - {{ w.hcloud_server_info[0].ipv4_address }}
           {% endfor %}
           Inventory saved to ./inventory.ini
 

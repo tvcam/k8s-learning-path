@@ -3,6 +3,7 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  become: no
   vars:
     hcloud_token: "{{ lookup('env', 'HCLOUD_TOKEN') }}"
   tasks:

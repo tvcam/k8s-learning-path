@@ -4,23 +4,48 @@ This Ansible setup automates the creation and configuration of a Kubernetes clus
 
 ## Prerequisites
 
-1. **Hetzner Cloud API Token**
+1. **Python 3.9+** (Python 3.11 recommended)
+   - The Hetzner Cloud collection requires Python 3.9 or newer
+   - Check your version: `python3.11 --version` or `python3 --version`
+   - If needed, install: `sudo apt install python3.11`
+
+2. **Hetzner Cloud API Token**
    - Create from [console.hetzner.cloud → Access → API Tokens]
    - Must start with `hcloud_...`
 
-2. **SSH Key in Hetzner Cloud**
+3. **SSH Key in Hetzner Cloud**
    - Add your SSH key to Hetzner Cloud console
    - Update `ssh_key_name` in `provision.yml` to match your key name
 
-3. **Install Dependencies**
+4. **Install Dependencies**
 
 ```bash
-sudo apt install -y python3-pip
-pip install ansible hetzner.hcloud
+# Install pip for Python 3.11 (if not already installed)
+curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 - --user
+
+# Install Ansible with Python 3.11
+python3.11 -m pip install --user ansible
+
+# Add Ansible to PATH (add this to your ~/.zshrc or ~/.bashrc to make it permanent)
+export PATH="$HOME/.local/bin:$PATH"
+
+# Install Hetzner Cloud collection and Python library
 ansible-galaxy collection install hetzner.hcloud
+python3.11 -m pip install --user hcloud
+
+# Optional: Install hetzner CLI for manual server management
+curl -sSLO https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz
+sudo tar -C /usr/local/bin --no-same-owner -xzf hcloud-linux-amd64.tar.gz hcloud
+rm hcloud-linux-amd64.tar.gz
 ```
 
-4. **Export API Token**
+**Important:** Make sure `~/.local/bin` is in your PATH. Add this to your `~/.zshrc`:
+```bash
+echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+```
+
+5. **Export API Token**
 
 ```bash
 export HCLOUD_TOKEN="hcloud_xxxxxxxxxxxxxxxxxxxxx"

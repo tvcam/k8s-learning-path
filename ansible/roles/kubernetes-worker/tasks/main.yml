@@ -42,7 +42,7 @@
   when: not kubelet_conf.stat.exists
 
 - name: Join worker to Kubernetes cluster
-  command: /tmp/k8s-join-command.sh
+  shell: bash /tmp/k8s-join-command.sh
   when: not kubelet_conf.stat.exists
 
 - name: Remove join command file
