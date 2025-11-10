@@ -1,159 +1,87 @@
-# Kubernetes Cluster Setup with Ansible
+# Kubernetes on Hetzner Cloud with Ansible
 
-This Ansible setup automates the creation and configuration of a Kubernetes cluster on Hetzner Cloud.
+Automated Kubernetes cluster deployment on Hetzner Cloud infrastructure.
 
-## Prerequisites
-
-1. **Python 3.9+** (Python 3.11 recommended)
-   - The Hetzner Cloud collection requires Python 3.9 or newer
-   - Check your version: `python3.11 --version` or `python3 --version`
-   - If needed, install: `sudo apt install python3.11`
-
-2. **Hetzner Cloud API Token**
-   - Create from [console.hetzner.cloud → Access → API Tokens]
-   - Must start with `hcloud_...`
-
-3. **SSH Key in Hetzner Cloud**
-   - Add your SSH key to Hetzner Cloud console
-   - Update `ssh_key_name` in `provision.yml` to match your key name
-
-4. **Install Dependencies**
+## Quick Start
 
 ```bash
-# Install pip for Python 3.11 (if not already installed)
-curl -sS https://bootstrap.pypa.io/get-pip.py | python3.11 - --user
-
-# Install Ansible with Python 3.11
+# 1. Install dependencies
 python3.11 -m pip install --user ansible
-
-# Add Ansible to PATH (add this to your ~/.zshrc or ~/.bashrc to make it permanent)
-export PATH="$HOME/.local/bin:$PATH"
-
-# Install Hetzner Cloud collection and Python library
 ansible-galaxy collection install hetzner.hcloud
 python3.11 -m pip install --user hcloud
 
-# Optional: Install hetzner CLI for manual server management
-curl -sSLO https://github.com/hetznercloud/cli/releases/latest/download/hcloud-linux-amd64.tar.gz
-sudo tar -C /usr/local/bin --no-same-owner -xzf hcloud-linux-amd64.tar.gz hcloud
-rm hcloud-linux-amd64.tar.gz
-```
+# 2. Configure
+export HCLOUD_TOKEN="hcloud_xxxxxxxxxxxxx"
+# Edit provision.yml: Update ssh_key_name to match your Hetzner SSH key
 
-**Important:** Make sure `~/.local/bin` is in your PATH. Add this to your `~/.zshrc`:
-```bash
-echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.zshrc
-source ~/.zshrc
-```
-
-5. **Export API Token**
-
-```bash
-export HCLOUD_TOKEN="hcloud_xxxxxxxxxxxxxxxxxxxxx"
-```
-
-## Usage
-
-### 1. Provision Servers
-
-This creates the master and worker nodes on Hetzner Cloud:
-
-```bash
+# 3. Deploy
 cd ansible
-ansible-playbook provision.yml
-```
+ansible-playbook provision.yml                    # Create servers (~2 min)
+ansible-playbook -i inventory.ini playbook.yml    # Configure K8s (~10 min)
 
-This will:
-- Create 1 master node (cx32: 4 CPU, 8GB RAM)
-- Create 2 worker nodes (cx22: 2 CPU, 4GB RAM)
-- Generate `inventory.ini` with server IPs
-
-### 2. Configure Kubernetes Cluster
-
-This installs and configures Kubernetes on all nodes:
-
-```bash
-ansible-playbook -i inventory.ini playbook.yml
-```
-
-This will:
-- Install containerd on all nodes
-- Set up system requirements (disable swap, load kernel modules, etc.)
-- Initialize Kubernetes control plane on master
-- Install Flannel CNI
-- Join worker nodes to the cluster
-
-**Time:** ~10-15 minutes
-
-### 3. Access the Cluster
-
-SSH into the master node:
-
-```bash
-ssh root@$(grep master inventory.ini | awk '{print $2}' | cut -d= -f2)
-```
-
-Check the cluster status:
-
-```bash
+# 4. Access
+ssh root@<master-ip>  # IP from inventory.ini
 kubectl get nodes
 ```
 
-### 4. Destroy the Cluster (Optional)
+## What You Get
 
-When done, remove all servers:
+- 1× Master node (cx32: 4 vCPU, 8GB RAM) 
+- 1× Worker node (cx22: 2 vCPU, 4GB RAM)
+- Kubernetes v1.30 with Flannel CNI
+- Ready to use in ~15 minutes
+- Cost: ~€21/month (~$0.03/hour)
+
+## Requirements
+
+- Python 3.11+
+- Hetzner Cloud account with API token
+- SSH key uploaded to Hetzner Cloud
+
+## Common Commands
 
 ```bash
+# Check cluster status (via Ansible)
+ansible master -i inventory.ini -m shell -a "kubectl get nodes"
+
+# Destroy everything
 ansible-playbook destroy.yml
 ```
 
 ## Configuration
 
-### Customizing Server Types
+Edit `provision.yml` to customize:
 
-Edit `provision.yml` to change:
-- `server_type_master`: Master node size (default: cx32)
-- `server_type_worker`: Worker node size (default: cx22)
-- `worker_count`: Number of worker nodes (default: 2)
-- `location`: Hetzner datacenter (default: hel1)
-
-### Customizing Kubernetes Version
-
-Edit the repository URL in:
-- `roles/kubernetes-master/tasks/main.yml`
-- `roles/kubernetes-worker/tasks/main.yml`
-
-Change `v1.30` to your desired version.
-
-## Troubleshooting
-
-### SSH Connection Issues
-
-If you get SSH connection errors, wait a few minutes for servers to fully boot, then retry.
-
-### Join Command Issues
-
-If workers fail to join, regenerate the join command on master:
-
-```bash
-ssh root@<master-ip>
-kubeadm token create --print-join-command
+```yaml
+server_type_master: cx32    # Master size
+server_type_worker: cx22    # Worker size
+worker_count: 1             # Number of workers
+location: hel1              # Datacenter (hel1, fsn1, nbg1, ash)
 ```
-
-Then manually run the command on workers.
 
 ## Structure
 
 ```
 ansible/
-├── inventory.ini             # Auto-generated by provision.yml
-├── playbook.yml              # Main cluster setup playbook
-├── provision.yml             # Server provisioning playbook
-├── destroy.yml               # Cleanup playbook
-├── README.md                 # This file
+├── provision.yml          # Creates Hetzner servers
+├── playbook.yml           # Configures Kubernetes
+├── destroy.yml            # Deletes everything
+├── inventory.ini          # Auto-generated server IPs
 └── roles/
-    ├── common/               # System setup (swap, kernel modules, etc.)
-    ├── containerd/           # Container runtime
-    ├── kubernetes-master/    # Control plane setup
-    └── kubernetes-worker/    # Worker node setup
+    ├── common/            # System setup
+    ├── containerd/        # Container runtime
+    ├── kubernetes-master/ # Control plane
+    └── kubernetes-worker/ # Worker nodes
 ```
 
+## Troubleshooting
+
+**Server limit reached**: New Hetzner accounts have 3-server limit. Reduce `worker_count: 1` or contact support.
+
+**Python error**: Requires Python 3.9+. Use Python 3.11: `python3.11 -m pip install --user ansible`
+
+**SSH fails**: Wait 1-2 min for servers to boot, then retry playbook.
+
+## Learn More
+
+See `01-understand-k8s.md` and `02-using-ansible.md` for detailed guides.
