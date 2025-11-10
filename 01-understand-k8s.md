@@ -1,9 +1,3 @@
-Perfect 👌 — since you already have hands-on knowledge (Docker, some Kubernetes exposure, Hetzner setup, Ansible automation), I’ll explain **how Docker and Kubernetes work together** and how you can **manually set up and manage Kubernetes on Hetzner** — not like a beginner’s textbook, but at your level (a practical, developer-operator view).
-
-Let’s break this into four digestible parts:
-
----
-
 ## 🧱 1. The Big Picture: Docker vs Kubernetes
 
 You already know Docker runs containers — isolated environments for your apps.
